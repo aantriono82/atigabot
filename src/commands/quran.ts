@@ -1,7 +1,8 @@
 import type { CommandContext } from "../types";
-import { sendMessage } from "../telegram/client";
+import { sendMessage, sendPhotoBuffer } from "../telegram/client";
 import { getAyatRange } from "../services/quran";
 import { parseAyatReference } from "../lib/parseReference";
+import { renderArabicCard } from "../lib/arabicCard";
 
 const USAGE =
   "Kirim perintah /quran <surat:ayat> untuk menampilkan ayat Al-Qur'an pilihanmu!" +
@@ -26,7 +27,9 @@ export async function quran(ctx: CommandContext): Promise<void> {
     return;
   }
 
-  for (const row of rows) {
-    await sendMessage(ctx.env, ctx.chatId, `${row.arabic}\n${row.translation}`);
-  }
+  const arabicCard = await renderArabicCard(rows.map((row) => row.arabic).join("\n\n"));
+  await sendPhotoBuffer(ctx.env, ctx.chatId, arabicCard);
+
+  const translations = rows.map((row) => `${row.ayat}. ${row.translation}`).join("\n\n");
+  await sendMessage(ctx.env, ctx.chatId, translations);
 }

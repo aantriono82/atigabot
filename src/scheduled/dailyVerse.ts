@@ -1,8 +1,9 @@
 import type { Env } from "../types";
-import { sendMessage } from "../telegram/client";
+import { sendMessage, sendPhotoBuffer } from "../telegram/client";
 import { getAyatRange } from "../services/quran";
 import { listSubscriberChatIds } from "../services/subscribers";
 import { pickRandomVerseRange } from "../dailyVersePicks";
+import { renderArabicCard } from "../lib/arabicCard";
 
 export async function sendDailyVerse(env: Env): Promise<void> {
   const pick = pickRandomVerseRange();
@@ -16,10 +17,12 @@ export async function sendDailyVerse(env: Env): Promise<void> {
   const intro = `Assalamu'alaikum! Ayat pilihan hari ini adalah QS. ${rows[0]?.surah_name_latin}:${pick.ayatStart}${
     pick.ayatEnd !== pick.ayatStart ? `-${pick.ayatEnd}` : ""
   }`;
-  const body = rows.map((r) => `${r.arabic}\n${r.translation}`).join("\n\n");
+  const arabicCard = await renderArabicCard(rows.map((r) => r.arabic).join("\n\n"));
+  const translations = rows.map((r) => `${r.ayat}. ${r.translation}`).join("\n\n");
 
   for (const chatId of subscribers) {
     await sendMessage(env, chatId, intro);
-    await sendMessage(env, chatId, body);
+    await sendPhotoBuffer(env, chatId, arabicCard);
+    await sendMessage(env, chatId, translations);
   }
 }

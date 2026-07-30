@@ -34,6 +34,26 @@ export async function sendPhoto(
   }
 }
 
+/** Like sendPhoto, but for images rendered on the fly rather than hosted at a URL. */
+export async function sendPhotoBuffer(
+  env: Env,
+  chatId: number,
+  photo: Uint8Array,
+  filename = "card.png",
+): Promise<void> {
+  const form = new FormData();
+  form.set("chat_id", String(chatId));
+  form.set("photo", new Blob([photo], { type: "image/png" }), filename);
+
+  const res = await fetch(apiUrl(env, "sendPhoto"), {
+    method: "POST",
+    body: form,
+  });
+  if (!res.ok) {
+    console.error("sendPhotoBuffer failed", chatId, await res.text());
+  }
+}
+
 export async function setWebhook(
   env: Env,
   url: string,

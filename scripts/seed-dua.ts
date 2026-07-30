@@ -1,25 +1,22 @@
 // One-time seed script for the 20 daily du'as shown by /doa.
 //
-// Du'a 1-4 are scraped live from duaandazkar.com/chapter-4-daily-essential-duas
-// (images + text). As of this rewrite, that page only publishes 4 of the
-// original 20 du'as (the site was redesigned around a companion app and
-// dropped the rest) — confirmed by fetching the page and finding only
-// "Dua 1".."Dua 4" headings. Du'a 5-20 are therefore curated by hand below
-// from well-known Hisnul Muslim (Fortress of the Muslim) references instead
-// of scraped; they have no source image.
+// All 20 du'as are curated by hand below (Arabic text, Latin transliteration,
+// and Indonesian translation/name/hadith), sourced from well-known Hisnul
+// Muslim (Fortress of the Muslim) references. Since Telegram text messages
+// cannot render a custom font, the Arabic text is also rendered to a PNG
+// card in the Amiri font (see render-arabic.ts) and sent as a photo.
 //
 // Output:
-//   seed/dua.sql          - INSERT statements for daily_dua
-//   seed/images/dN.png    - downloaded images for du'a 1-4
-//   seed/upload-images.sh - `wrangler r2 object put` commands for those images
+//   seed/dua.sql             - INSERT statements for daily_dua
+//   seed/images/arabic/dN.png - rendered Amiri-font Arabic card per du'a
+//   seed/upload-images.sh    - `wrangler r2 object put` commands for those images
 import { mkdir, writeFile } from "node:fs/promises";
-import * as cheerio from "cheerio";
-
-const SOURCE_URL = "https://duaandazkar.com/chapter-4-daily-essential-duas/";
+import { renderArabicCard } from "./render-arabic";
 
 interface DuaRow {
   id: number;
   name: string;
+  arabic: string;
   reference: string;
   pronunciation: string;
   translation: string;
@@ -31,274 +28,290 @@ function sqlEscape(value: string): string {
   return value.replace(/'/g, "''");
 }
 
-function between(text: string, start: string, end: string | null): string {
-  const startIdx = text.indexOf(start);
-  if (startIdx === -1) return "";
-  const from = startIdx + start.length;
-  const endIdx = end ? text.indexOf(end, from) : -1;
-  const raw = endIdx === -1 ? text.slice(from) : text.slice(from, endIdx);
-  return raw.replace(/\s+/g, " ").trim();
-}
-
-async function scrapeFirstFour(): Promise<DuaRow[]> {
-  console.log(`Fetching ${SOURCE_URL} ...`);
-  const res = await fetch(SOURCE_URL, {
-    headers: { "user-agent": "Mozilla/5.0 (compatible; AtigaBotSeed/1.0)" },
-  });
-  if (!res.ok) throw new Error(`Failed to fetch ${SOURCE_URL}: ${res.status}`);
-  const html = await res.text();
-
-  const headingRe = /<span[^>]*>Dua (\d+)<\/span>/g;
-  const marks: { n: number; index: number }[] = [];
-  for (const m of html.matchAll(headingRe)) {
-    marks.push({ n: Number(m[1]), index: m.index ?? 0 });
-  }
-  if (marks.length === 0) {
-    throw new Error("No 'Dua N' headings found - page structure may have changed again.");
-  }
-
-  const rows: DuaRow[] = [];
-  for (let i = 0; i < marks.length; i++) {
-    const mark = marks[i]!;
-    const chunkEnd = marks[i + 1]?.index ?? html.length;
-    const chunkHtml = html.slice(mark.index, chunkEnd);
-
-    // chunkHtml starts mid-element at "<span>Dua N</span>", so the enclosing
-    // <h2> was already stripped off by slicing; recover the name (which may
-    // or may not itself be wrapped in a <span>) from what follows up to </h2>.
-    const nameMatch = /^<span[^>]*>Dua \d+<\/span>\s*<br\s*\/?>\s*(.*?)<\/h2>/s.exec(
-      chunkHtml,
-    );
-    const name = nameMatch
-      ? cheerio.load(nameMatch[1]).root().text().replace(/\s+/g, " ").trim()
-      : "";
-
-    const $ = cheerio.load(chunkHtml);
-    const imgMatch = /src="([^"]+\/d(\d+)\.png)"/.exec(chunkHtml);
-    const imageUrl = imgMatch?.[1];
-    const imageKey = imgMatch ? `dua/d${imgMatch[2]}.png` : "";
-
-    const text = $.root().text().replace(/\s+/g, " ").trim();
-    const reference = between(text, "REFERENCE", "TRANSLITERATION");
-    const pronunciation = between(text, "TRANSLITERATION", "TRANSLATION");
-    const translation = between(text, "TRANSLATION", "BENEFIT AND VIRTUE");
-    let hadith = between(text, "BENEFIT AND VIRTUE", null);
-    hadith = hadith.split(/Show more/i)[0]?.trim() ?? "";
-
-    if (imageUrl) {
-      const imgRes = await fetch(imageUrl);
-      if (imgRes.ok) {
-        await mkdir("seed/images", { recursive: true });
-        const buf = Buffer.from(await imgRes.arrayBuffer());
-        await writeFile(`seed/images/d${mark.n}.png`, buf);
-      } else {
-        console.warn(`Could not download image for Dua ${mark.n}: ${imgRes.status}`);
-      }
-    }
-
-    rows.push({
-      id: mark.n,
-      name,
-      reference,
-      pronunciation,
-      translation,
-      hadith,
-      imageKey,
-    });
-  }
-  return rows;
-}
-
-// Du'a 5-20: curated from Hisnul Muslim (Fortress of the Muslim) by Sa'id bin
-// Ali bin Wahf Al-Qahtani and associated authentic hadith references, since
-// duaandazkar.com no longer publishes these. No source image available.
+// Du'a 1-20: curated from Hisnul Muslim (Fortress of the Muslim) by Sa'id bin
+// Ali bin Wahf Al-Qahtani and associated authentic hadith references.
 const CURATED_DUAS: DuaRow[] = [
   {
+    id: 1,
+    name: "SEBELUM TIDUR",
+    arabic: "بِاسْمِكَ اللَّهُمَّ أَمُوتُ وَأَحْيَا",
+    reference: "Sahih Muslim 4/2083 | Fathul Bari 11/113",
+    pronunciation: "Bismika Allahumma amuutu wa ahyaa.",
+    translation: "Dengan nama-Mu ya Allah, aku mati dan aku hidup.",
+    hadith:
+      "Hudzaifah radhiyallahu 'anhu meriwayatkan: \"Ketika Nabi shallallahu 'alaihi wa sallam hendak tidur, beliau membaca do'a ini.\" (Al-Bukhari 8/75/326)",
+    imageKey: "",
+  },
+  {
+    id: 2,
+    name: "BANGUN TIDUR",
+    arabic: "الْحَمْدُ لِلَّهِ الَّذِي أَحْيَانَا بَعْدَ مَا أَمَاتَنَا وَإِلَيْهِ النُّشُورُ",
+    reference: "Sahih Muslim 4/2083 | Fathul Bari 11/113",
+    pronunciation:
+      "Alhamdu lillahil-ladzi ahyaanaa ba'da maa amaatanaa wa ilaihin-nusyuur.",
+    translation:
+      "Segala puji bagi Allah yang telah menghidupkan kami setelah mematikan kami (tidur), dan hanya kepada-Nya kami dibangkitkan.",
+    hadith:
+      "Hudzaifah radhiyallahu 'anhu meriwayatkan: \"Ketika Nabi shallallahu 'alaihi wa sallam bangun tidur, beliau membaca do'a ini.\" (Al-Bukhari 8/75/326)",
+    imageKey: "",
+  },
+  {
+    id: 3,
+    name: "MASUK WC",
+    arabic: "بِسْمِ اللَّهِ اللَّهُمَّ إِنِّي أَعُوذُ بِكَ مِنَ الْخُبُثِ وَالْخَبَائِثِ",
+    reference: "Al-Bukhari 1/45 | Sahih Muslim 1/283",
+    pronunciation:
+      "Bismillah. Allahumma innii a'uudzu bika minal khubutsi wal khabaa'its.",
+    translation:
+      "Dengan nama Allah. Ya Allah, sesungguhnya aku berlindung kepada-Mu dari setan laki-laki dan setan perempuan.",
+    hadith:
+      "Anas bin Malik radhiyallahu 'anhu meriwayatkan: \"Setiap kali Nabi shallallahu 'alaihi wa sallam hendak masuk ke tempat buang hajat, beliau membaca do'a ini.\" (Al-Bukhari 1/45; Sahih Muslim 1/283). Zaid bin Arqam radhiyallahu 'anhu meriwayatkan, Nabi shallallahu 'alaihi wa sallam bersabda: \"Tempat-tempat buang hajat ini didatangi setan, maka bila salah seorang dari kalian hendak masuk, bacalah do'a ini.\" (Abu Dawud 6). Masuklah dengan kaki kiri terlebih dahulu.",
+    imageKey: "",
+  },
+  {
+    id: 4,
+    name: "KELUAR WC",
+    arabic: "غُفْرَانَكَ. الْحَمْدُ لِلَّهِ الَّذِي أَذْهَبَ عَنِّي الْأَذَى وَعَافَانِي",
+    reference: "Abu Dawud | Ibnu Majah | At-Tirmidzi",
+    pronunciation: "Pilihan 1: Ghufraanak. Pilihan 2: Alhamdu lillahil-ladzi adzhaba 'annil-adzaa wa 'aafaanii.",
+    translation:
+      "Aku memohon ampunan-Mu. Segala puji bagi Allah yang telah menghilangkan gangguan dariku dan menyehatkanku.",
+    hadith:
+      "Aisyah radhiyallahu 'anha meriwayatkan: \"Ketika Nabi shallallahu 'alaihi wa sallam keluar dari tempat buang hajat, beliau mengucapkan Ghufraanak.\" (At-Tirmidzi). Keluarlah dengan kaki kanan terlebih dahulu.",
+    imageKey: "",
+  },
+  {
     id: 5,
-    name: "START OF WUDU",
-    reference: "Sunan Abu Dawud 101, Sunan Ibn Majah 397",
-    pronunciation: "Bismillah",
-    translation: "In the name of Allah.",
-    hadith: "The Prophet (peace be upon him) said there is no (complete) ablution for the one who does not mention the name of Allah over it.",
+    name: "AWAL WUDU",
+    arabic: "بِسْمِ اللَّهِ",
+    reference: "Sunan Abu Dawud 101, Sunan Ibnu Majah 397",
+    pronunciation: "Bismillah.",
+    translation: "Dengan nama Allah.",
+    hadith:
+      "Nabi shallallahu 'alaihi wa sallam bersabda bahwa tidak sempurna wudu seseorang yang tidak menyebut nama Allah atasnya.",
     imageKey: "",
   },
   {
     id: 6,
-    name: "COMPLETION OF WUDU",
-    reference: "Sahih Muslim 234, Jami at-Tirmidhi 55",
+    name: "SELESAI WUDU",
+    arabic:
+      "أَشْهَدُ أَنْ لَا إِلَهَ إِلَّا اللَّهُ وَحْدَهُ لَا شَرِيكَ لَهُ، وَأَشْهَدُ أَنَّ مُحَمَّدًا عَبْدُهُ وَرَسُولُهُ، اللَّهُمَّ اجْعَلْنِي مِنَ التَّوَّابِينَ وَاجْعَلْنِي مِنَ الْمُتَطَهِّرِينَ",
+    reference: "Sahih Muslim 234, Jami' at-Tirmidzi 55",
     pronunciation:
-      "Ash-hadu al-la ilaha illallahu wahdahu la sharika lahu, wa ash-hadu anna Muhammadan 'abduhu wa rasuluh. Allahummaj-'alni minat-tawwabina waj-'alni minal-mutatahhirin.",
+      "Asy-hadu al-laa ilaaha illallaahu wahdahu laa syariika lahu, wa asy-hadu anna Muhammadan 'abduhu wa rasuuluh. Allahummaj-'alnii minat-tawwaabiina waj-'alnii minal-mutathahhiriin.",
     translation:
-      "I bear witness that none has the right to be worshipped but Allah alone, without any partner, and I bear witness that Muhammad is His slave and Messenger. O Allah, make me among those who repent and make me among those who purify themselves.",
-    hadith: "Whoever performs ablution well and then says this, the eight gates of Paradise will be opened for him, and he may enter through whichever he wishes.",
+      "Aku bersaksi bahwa tiada Tuhan yang berhak disembah selain Allah semata, tidak ada sekutu bagi-Nya, dan aku bersaksi bahwa Muhammad adalah hamba dan utusan-Nya. Ya Allah, jadikanlah aku termasuk orang-orang yang bertaubat dan jadikanlah aku termasuk orang-orang yang mensucikan diri.",
+    hadith:
+      "Barangsiapa berwudu dengan sempurna lalu mengucapkan do'a ini, maka akan dibukakan baginya delapan pintu surga, dan ia boleh masuk dari pintu mana saja yang ia kehendaki.",
     imageKey: "",
   },
   {
     id: 7,
-    name: "ENTERING THE MOSQUE",
+    name: "MASUK MASJID",
+    arabic: "اللَّهُمَّ افْتَحْ لِي أَبْوَابَ رَحْمَتِكَ",
     reference: "Sahih Muslim 713",
-    pronunciation: "Allahummaf-tah li abwaba rahmatik.",
-    translation: "O Allah, open the gates of Your mercy for me.",
-    hadith: "The Prophet (peace be upon him) taught this du'a to be said upon entering the mosque.",
+    pronunciation: "Allahummaf-tah lii abwaaba rahmatik.",
+    translation: "Ya Allah, bukakanlah untukku pintu-pintu rahmat-Mu.",
+    hadith:
+      "Nabi shallallahu 'alaihi wa sallam mengajarkan do'a ini untuk dibaca ketika memasuki masjid.",
     imageKey: "",
   },
   {
     id: 8,
-    name: "LEAVING THE MOSQUE",
+    name: "KELUAR MASJID",
+    arabic: "اللَّهُمَّ إِنِّي أَسْأَلُكَ مِنْ فَضْلِكَ",
     reference: "Sahih Muslim 713",
-    pronunciation: "Allahumma inni as'aluka min fadlik.",
-    translation: "O Allah, I ask You from Your bounty.",
-    hadith: "The Prophet (peace be upon him) taught this du'a to be said upon leaving the mosque.",
+    pronunciation: "Allahumma innii as'aluka min fadhlik.",
+    translation: "Ya Allah, sesungguhnya aku memohon kepada-Mu dari karunia-Mu.",
+    hadith:
+      "Nabi shallallahu 'alaihi wa sallam mengajarkan do'a ini untuk dibaca ketika keluar dari masjid.",
     imageKey: "",
   },
   {
     id: 9,
-    name: "BEFORE THE MEALS",
+    name: "SEBELUM MAKAN",
+    arabic: "بِسْمِ اللَّهِ",
     reference: "Sunan Abu Dawud 3767",
-    pronunciation: "Bismillah",
-    translation: "In the name of Allah.",
-    hadith: "The Prophet (peace be upon him) instructed saying the name of Allah before eating.",
+    pronunciation: "Bismillah.",
+    translation: "Dengan nama Allah.",
+    hadith:
+      "Nabi shallallahu 'alaihi wa sallam memerintahkan untuk menyebut nama Allah sebelum makan.",
     imageKey: "",
   },
   {
     id: 10,
-    name: "FORGETTING TO RECITE BISMILLAH",
-    reference: "Sunan Abu Dawud 3767, Jami at-Tirmidhi 1858",
-    pronunciation: "Bismillahi awwalahu wa akhirah.",
-    translation: "In the name of Allah at its beginning and at its end.",
-    hadith: "If one forgets to mention Allah's name at the start of the meal, this is said upon remembering.",
+    name: "LUPA MEMBACA BISMILLAH",
+    arabic: "بِسْمِ اللَّهِ أَوَّلَهُ وَآخِرَهُ",
+    reference: "Sunan Abu Dawud 3767, Jami' at-Tirmidzi 1858",
+    pronunciation: "Bismillahi awwalahu wa aakhirah.",
+    translation: "Dengan nama Allah pada awal dan akhirnya.",
+    hadith:
+      "Jika seseorang lupa menyebut nama Allah di awal makan, do'a ini dibaca ketika ia teringat.",
     imageKey: "",
   },
   {
     id: 11,
-    name: "AFTER MEALS",
-    reference: "Sunan Abu Dawud 4023, Jami at-Tirmidhi 3458, Sunan Ibn Majah 3285",
+    name: "SETELAH MAKAN",
+    arabic:
+      "الْحَمْدُ لِلَّهِ الَّذِي أَطْعَمَنِي هَذَا وَرَزَقَنِيهِ مِنْ غَيْرِ حَوْلٍ مِنِّي وَلَا قُوَّةٍ",
+    reference: "Sunan Abu Dawud 4023, Jami' at-Tirmidzi 3458, Sunan Ibnu Majah 3285",
     pronunciation:
-      "Al-hamdu lillahil-ladhi at'amani hadha wa razaqanihi min ghayri hawlin minni wa la quwwah.",
+      "Alhamdu lillahil-ladzi ath'amanii hadzaa wa razaqaniihi min ghairi haulin minnii wa laa quwwah.",
     translation:
-      "Praise be to Allah Who has fed me this and provided it for me without any might or power on my part.",
-    hadith: "Whoever says this after eating, his past sins will be forgiven.",
+      "Segala puji bagi Allah yang telah memberiku makan ini dan memberikan rezeki ini kepadaku tanpa daya dan kekuatan dariku.",
+    hadith:
+      "Barangsiapa mengucapkan do'a ini setelah makan, maka dosa-dosanya yang telah lalu akan diampuni.",
     imageKey: "",
   },
   {
     id: 12,
-    name: "AFTER MEALS (SECOND OPTION)",
+    name: "SETELAH MAKAN (PILIHAN KEDUA)",
+    arabic:
+      "الْحَمْدُ لِلَّهِ حَمْدًا كَثِيرًا طَيِّبًا مُبَارَكًا فِيهِ غَيْرَ مَكْفِيٍّ وَلَا مُوَدَّعٍ وَلَا مُسْتَغْنًى عَنْهُ رَبَّنَا",
     reference: "Sahih al-Bukhari 5459",
     pronunciation:
-      "Al-hamdu lillahi hamdan kathiran tayyiban mubarakan fihi ghayra makfiyyin wa la muwadda'in wa la mustaghnan 'anhu Rabbana.",
+      "Alhamdu lillahi hamdan katsiiran thayyiban mubaarakan fiihi ghaira makfiyyin wa laa muwadda'in wa laa mustaghnan 'anhu Rabbanaa.",
     translation:
-      "Praise be to Allah, praise in abundance, good and blessed, which is neither insufficient, nor forsaken, nor can it be dispensed with, O our Lord.",
-    hadith: "A man said this after eating and the Prophet (peace be upon him) commented that angels compete to record such praise.",
+      "Segala puji bagi Allah, pujian yang banyak, baik, dan penuh berkah, yang tidak cukup, tidak ditinggalkan, dan tidak dapat digantikan, wahai Rabb kami.",
+    hadith:
+      "Seorang laki-laki mengucapkan do'a ini setelah makan, dan Nabi shallallahu 'alaihi wa sallam bersabda bahwa para malaikat berlomba-lomba mencatat pujian tersebut.",
     imageKey: "",
   },
   {
     id: 13,
-    name: "LEAVING HOME",
-    reference: "Sunan Abu Dawud 5095, Jami at-Tirmidhi 3426",
+    name: "KELUAR RUMAH",
+    arabic:
+      "بِسْمِ اللَّهِ تَوَكَّلْتُ عَلَى اللَّهِ وَلَا حَوْلَ وَلَا قُوَّةَ إِلَّا بِاللَّهِ",
+    reference: "Sunan Abu Dawud 5095, Jami' at-Tirmidzi 3426",
     pronunciation:
-      "Bismillahi tawakkaltu 'alallah, wa la hawla wa la quwwata illa billah.",
+      "Bismillahi tawakkaltu 'alallaah, wa laa haula wa laa quwwata illaa billaah.",
     translation:
-      "In the name of Allah, I place my trust in Allah, and there is no might nor power except with Allah.",
-    hadith: "Whoever says this upon leaving his house will be told: you are guided, defended, and protected, and the devils will turn away from him.",
+      "Dengan nama Allah, aku bertawakal kepada Allah, dan tiada daya serta kekuatan kecuali dengan (pertolongan) Allah.",
+    hadith:
+      "Barangsiapa mengucapkan do'a ini ketika keluar rumah, akan dikatakan kepadanya: \"Engkau telah diberi petunjuk, dicukupi, dan dilindungi\", dan setan-setan akan menjauh darinya.",
     imageKey: "",
   },
   {
     id: 14,
-    name: "ENTERING HOME",
+    name: "MASUK RUMAH",
+    arabic: "بِسْمِ اللَّهِ وَلَجْنَا، وَبِسْمِ اللَّهِ خَرَجْنَا، وَعَلَى رَبِّنَا تَوَكَّلْنَا",
     reference: "Sunan Abu Dawud 5096",
-    pronunciation: "Bismillahi walajna, wa bismillahi kharajna, wa 'ala Rabbina tawakkalna.",
-    translation: "In the name of Allah we enter, and in the name of Allah we leave, and upon our Lord we place our trust.",
-    hadith: "This is followed by greeting the household with salam upon entering.",
+    pronunciation:
+      "Bismillahi walajnaa, wa bismillahi kharajnaa, wa 'alaa Rabbinaa tawakkalnaa.",
+    translation:
+      "Dengan nama Allah kami masuk, dan dengan nama Allah kami keluar, dan hanya kepada Rabb kami, kami bertawakal.",
+    hadith: "Do'a ini diikuti dengan mengucapkan salam kepada keluarga ketika masuk rumah.",
     imageKey: "",
   },
   {
     id: 15,
-    name: "ON JOURNEY",
+    name: "DALAM PERJALANAN",
+    arabic:
+      "اللَّهُ أَكْبَرُ، اللَّهُ أَكْبَرُ، اللَّهُ أَكْبَرُ، سُبْحَانَ الَّذِي سَخَّرَ لَنَا هَذَا وَمَا كُنَّا لَهُ مُقْرِنِينَ وَإِنَّا إِلَى رَبِّنَا لَمُنْقَلِبُونَ",
     reference: "Sahih Muslim 1342",
     pronunciation:
-      "Allahu Akbar, Allahu Akbar, Allahu Akbar. Subhanal-ladhi sakhkhara lana hadha wa ma kunna lahu muqrinin, wa inna ila Rabbina lamunqalibun.",
+      "Allahu Akbar, Allahu Akbar, Allahu Akbar. Subhaanal-ladzii sakhkhara lanaa hadzaa wa maa kunnaa lahu muqriniin, wa innaa ilaa Rabbinaa lamunqalibuun.",
     translation:
-      "Allah is the Greatest, Allah is the Greatest, Allah is the Greatest. Glory to Him Who has provided this for us though we could never have accomplished it by ourselves, and to our Lord we shall return.",
-    hadith: "Said by the Prophet (peace be upon him) upon mounting his ride for travel.",
+      "Allah Maha Besar, Allah Maha Besar, Allah Maha Besar. Maha Suci Dzat yang telah menundukkan ini untuk kami, padahal kami sebelumnya tidak mampu menguasainya. Dan sesungguhnya kami akan kembali kepada Rabb kami.",
+    hadith: "Diucapkan oleh Nabi shallallahu 'alaihi wa sallam ketika menaiki kendaraan untuk bepergian.",
     imageKey: "",
   },
   {
     id: 16,
-    name: "RETURN FROM JOURNEY",
+    name: "PULANG DARI PERJALANAN",
+    arabic: "آيِبُونَ تَائِبُونَ عَابِدُونَ لِرَبِّنَا حَامِدُونَ",
     reference: "Sahih Muslim 1344, Sahih al-Bukhari 1797",
-    pronunciation: "Ayibuna, ta'ibuna, 'abiduna, li Rabbina hamidun.",
-    translation: "We return, repent, worship, and praise our Lord.",
-    hadith: "Said (in addition to the travel du'a) upon returning from a journey.",
+    pronunciation: "Aayibuuna, taa'ibuuna, 'aabiduuna, li Rabbinaa haamiduun.",
+    translation: "Kami kembali, bertaubat, beribadah, dan memuji Rabb kami.",
+    hadith:
+      "Diucapkan (selain do'a perjalanan di atas) ketika kembali dari sebuah perjalanan.",
     imageKey: "",
   },
   {
     id: 17,
-    name: "WHEN SNEEZING",
+    name: "KETIKA BERSIN",
+    arabic: "الْحَمْدُ لِلَّهِ",
     reference: "Sahih al-Bukhari 6224",
-    pronunciation: "Al-hamdu lillah.",
-    translation: "All praise is due to Allah.",
-    hadith: "The one who sneezes should say this, and it is a right upon every Muslim who hears it to respond with the reply below.",
+    pronunciation: "Alhamdulillah.",
+    translation: "Segala puji bagi Allah.",
+    hadith:
+      "Orang yang bersin hendaknya mengucapkan do'a ini, dan menjadi kewajiban bagi setiap muslim yang mendengarnya untuk membalas dengan do'a berikut.",
     imageKey: "",
   },
   {
     id: 18,
-    name: "HEARING SOMEONE SNEEZE",
+    name: "MENDENGAR ORANG BERSIN",
+    arabic: "يَرْحَمُكَ اللَّهُ",
     reference: "Sahih al-Bukhari 6224",
     pronunciation: "Yarhamukallah.",
-    translation: "May Allah have mercy on you.",
-    hadith: "Said to the one who sneezes and then says 'Al-hamdu lillah'.",
+    translation: "Semoga Allah merahmatimu.",
+    hadith: "Diucapkan kepada orang yang bersin setelah ia mengucapkan 'Alhamdulillah'.",
     imageKey: "",
   },
   {
     id: 19,
-    name: "SNEEZER'S REPLY BACK",
+    name: "BALASAN DARI ORANG YANG BERSIN",
+    arabic: "يَهْدِيكُمُ اللَّهُ وَيُصْلِحُ بَالَكُمْ",
     reference: "Sahih al-Bukhari 6224",
-    pronunciation: "Yahdikumullahu wa yuslihu balakum.",
-    translation: "May Allah guide you and rectify your condition.",
-    hadith: "The one who sneezed replies with this to the one who said 'Yarhamukallah'.",
+    pronunciation: "Yahdiikumullaahu wa yushlihu baalakum.",
+    translation: "Semoga Allah memberi petunjuk kepada kalian dan memperbaiki keadaan kalian.",
+    hadith:
+      "Orang yang bersin membalas dengan do'a ini kepada orang yang mengucapkan 'Yarhamukallah'.",
     imageKey: "",
   },
   {
     id: 20,
-    name: "ENTERING THE MARKET",
-    reference: "Jami at-Tirmidhi 3428, Sunan Ibn Majah 2235",
+    name: "MASUK PASAR",
+    arabic:
+      "لَا إِلَهَ إِلَّا اللَّهُ وَحْدَهُ لَا شَرِيكَ لَهُ، لَهُ الْمُلْكُ وَلَهُ الْحَمْدُ يُحْيِي وَيُمِيتُ وَهُوَ حَيٌّ لَا يَمُوتُ بِيَدِهِ الْخَيْرُ وَهُوَ عَلَى كُلِّ شَيْءٍ قَدِيرٌ",
+    reference: "Jami' at-Tirmidzi 3428, Sunan Ibnu Majah 2235",
     pronunciation:
-      "La ilaha illallahu wahdahu la sharika lahu, lahul-mulku wa lahul-hamdu, yuhyi wa yumitu wa huwa hayyun la yamutu biyadihil-khayru wa huwa 'ala kulli shay'in qadir.",
+      "Laa ilaaha illallaahu wahdahu laa syariika lah, lahul-mulku wa lahul-hamdu yuhyii wa yumiitu wa huwa hayyun laa yamuutu biyadihil-khair, wa huwa 'alaa kulli syai'in qadiir.",
     translation:
-      "None has the right to be worshipped but Allah alone, Who has no partner. His is the dominion and His is the praise. He gives life and causes death, and He is Living and does not die. In His hand is all good, and He is over all things Omnipotent.",
-    hadith: "Whoever says this upon entering the market, Allah records for him a million good deeds and erases a million bad deeds.",
+      "Tiada Tuhan yang berhak disembah selain Allah semata, tidak ada sekutu bagi-Nya. Milik-Nya kerajaan dan pujian, Dia menghidupkan dan mematikan, Dia Maha Hidup dan tidak akan mati, di tangan-Nya segala kebaikan, dan Dia Maha Kuasa atas segala sesuatu.",
+    hadith:
+      "Barangsiapa mengucapkan do'a ini ketika memasuki pasar, Allah mencatat baginya sejuta kebaikan dan menghapus sejuta keburukan.",
     imageKey: "",
   },
 ];
 
 async function main() {
-  const scraped = await scrapeFirstFour();
-  const rows = [...scraped, ...CURATED_DUAS].sort((a, b) => a.id - b.id);
+  await mkdir("seed/images/arabic", { recursive: true });
+
+  const rows = CURATED_DUAS.map((r) => {
+    const imageKey = `dua/arabic/d${r.id}.png`;
+    const png = renderArabicCard(r.arabic);
+    return { ...r, imageKey, png };
+  });
+
+  for (const r of rows) {
+    await writeFile(`seed/images/arabic/d${r.id}.png`, r.png);
+  }
 
   const values = rows
     .map(
       (r) =>
-        `(${r.id}, '${sqlEscape(r.name)}', '${sqlEscape(r.reference)}', '${sqlEscape(
-          r.pronunciation,
-        )}', '${sqlEscape(r.translation)}', '${sqlEscape(r.hadith)}', '${sqlEscape(r.imageKey)}')`,
+        `(${r.id}, '${sqlEscape(r.name)}', '${sqlEscape(r.arabic)}', '${sqlEscape(
+          r.reference,
+        )}', '${sqlEscape(r.pronunciation)}', '${sqlEscape(r.translation)}', '${sqlEscape(
+          r.hadith,
+        )}', '${sqlEscape(r.imageKey)}')`,
     )
     .join(",\n");
-  const sql = `INSERT INTO daily_dua (id, name, reference, pronunciation, translation, hadith, image_key) VALUES\n${values};\n`;
+  const sql = `INSERT INTO daily_dua (id, name, arabic, reference, pronunciation, translation, hadith, image_key) VALUES\n${values};\n`;
 
   await mkdir("seed", { recursive: true });
   await writeFile("seed/dua.sql", sql, "utf8");
 
-  const uploadCommands = scraped
-    .filter((r) => r.imageKey)
-    .map((r) => {
-      const n = r.imageKey.match(/d(\d+)\.png/)?.[1];
-      return `wrangler r2 object put atigabot-assets/${r.imageKey} --file=seed/images/d${n}.png --content-type=image/png`;
-    })
+  const uploadCommands = rows
+    .map(
+      (r) =>
+        `wrangler r2 object put atigabot-assets/${r.imageKey} --file=seed/images/arabic/d${r.id}.png --content-type=image/png --remote`,
+    )
     .join("\n");
   await writeFile("seed/upload-images.sh", `#!/bin/sh\nset -e\n${uploadCommands}\n`, "utf8");
 
-  console.log(`Wrote seed/dua.sql (${rows.length} du'a), seed/upload-images.sh (${scraped.length} images).`);
-  console.log(`NOTE: only du'a ${scraped.map((r) => r.id).join(", ")} were scraped live; the rest are curated text without images.`);
+  console.log(`Wrote seed/dua.sql (${rows.length} du'a), seed/upload-images.sh (${rows.length} images).`);
 }
 
 main().catch((err) => {

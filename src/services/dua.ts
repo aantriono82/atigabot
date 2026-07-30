@@ -3,6 +3,7 @@ import type { Env } from "../types";
 export interface DuaRow {
   id: number;
   name: string;
+  arabic: string;
   reference: string;
   pronunciation: string;
   translation: string;
@@ -12,7 +13,7 @@ export interface DuaRow {
 
 export async function getDua(env: Env, id: number): Promise<DuaRow | null> {
   const row = await env.DB.prepare(
-    `SELECT id, name, reference, pronunciation, translation, hadith, image_key
+    `SELECT id, name, arabic, reference, pronunciation, translation, hadith, image_key
      FROM daily_dua WHERE id = ?`,
   )
     .bind(id)
@@ -21,24 +22,24 @@ export async function getDua(env: Env, id: number): Promise<DuaRow | null> {
 }
 
 export const DUA_LIST = [
-  "Upon Going to sleep",
-  "Wake up from sleep",
-  "Entering the Toilet",
-  "Leaving the Toilet",
-  "Start of Wudu",
-  "Completion of Wudu",
-  "Entering the Mosque",
-  "Leaving the Mosque",
-  "Before the Meals",
-  "Forgetting to recite Bismillah",
-  "After meals",
-  "After meals (Second Option)",
-  "Leaving Home",
-  "Entering Home",
-  "On Journey",
-  "Return From Journey",
-  "When Sneezing",
-  "Hearing someone sneeze",
-  "Sneezers replies back",
-  "Entering the Market",
+  "Sebelum Tidur",
+  "Bangun Tidur",
+  "Masuk WC",
+  "Keluar WC",
+  "Awal Wudu",
+  "Selesai Wudu",
+  "Masuk Masjid",
+  "Keluar Masjid",
+  "Sebelum Makan",
+  "Lupa Membaca Bismillah",
+  "Setelah Makan",
+  "Setelah Makan (Pilihan Kedua)",
+  "Keluar Rumah",
+  "Masuk Rumah",
+  "Dalam Perjalanan",
+  "Pulang dari Perjalanan",
+  "Ketika Bersin",
+  "Mendengar Orang Bersin",
+  "Balasan dari Orang yang Bersin",
+  "Masuk Pasar",
 ];

@@ -3,7 +3,7 @@ import { sendMessage, sendPhoto } from "../telegram/client";
 import { getDua, DUA_LIST } from "../services/dua";
 
 const USAGE =
-  "Kirim perintah /doa <nomor do'a> untuk menampilkan do'a sehari-hari yang kamu inginkan dalam bahasa Inggris" +
+  "Kirim perintah /doa <nomor do'a> untuk menampilkan do'a sehari-hari yang kamu inginkan lengkap dengan teks Arab dan artinya dalam bahasa Indonesia" +
   "\nContoh :\n/doa 1\n/doa 18." +
   "\n\nBerikut adalah daftar do'a sehari-hari yang ada :\n" +
   DUA_LIST.map((name, i) => `${i + 1}. ${name}`).join("\n");
@@ -35,6 +35,6 @@ export async function doa(ctx: CommandContext): Promise<void> {
   await sendMessage(
     ctx.env,
     ctx.chatId,
-    `Du'a:\n${row.name}\n\nReference:\n${row.reference}\n\nPronunciation:\n${row.pronunciation}\n\nTranslation:\n${row.translation}\n\nHadith/Benefit:\n${row.hadith}\n\nSumber: Daily essential duas oleh http://www.duaandazkar.com/`,
+    `Do'a: ${row.name}\n\nBacaan Latin:\n${row.pronunciation}\n\nArtinya:\n${row.translation}\n\nReferensi:\n${row.reference}\n\nHadits/Keutamaan:\n${row.hadith}\n\nSumber: Hisnul Muslim (Fortress of the Muslim) oleh Sa'id bin Ali bin Wahf Al-Qahtani`,
   );
 }
