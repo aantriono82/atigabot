@@ -1,0 +1,25 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "atigabot",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-07-29",
+  "observability": {
+    "enabled": true
+  },
+  "triggers": {
+    "crons": ["0 23 * * *"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "atigabot-db",
+      "database_id": "REPLACE_AFTER_WRANGLER_D1_CREATE"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "ASSETS",
+      "bucket_name": "atigabot-assets"
+    }
+  ]
+}

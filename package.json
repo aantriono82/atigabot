@@ -1,0 +1,26 @@
+{
+  "name": "atigabot",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p scripts/tsconfig.json",
+    "seed:quran": "tsx scripts/seed-quran.ts",
+    "seed:dua": "tsx scripts/seed-dua.ts",
+    "db:migrate:local": "wrangler d1 migrations apply atigabot-db --local",
+    "db:migrate:remote": "wrangler d1 migrations apply atigabot-db --remote"
+  },
+  "dependencies": {
+    "hono": "^4.6.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260722.1",
+    "@types/node": "^26.1.2",
+    "cheerio": "^1.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "wrangler": "^4.0.0"
+  }
+}
